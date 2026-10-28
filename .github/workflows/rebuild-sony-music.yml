@@ -1,0 +1,64 @@
+name: Rebuild and sign Sony Music APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'SonyMusic_source.zip'
+      - '.github/workflows/rebuild-sony-music.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip curl apksigner
+          curl -fL --retry 3 \
+            https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar \
+            -o apktool.jar
+          java -version
+          java -jar apktool.jar --version
+          apksigner --version
+
+      - name: Extract decompiled source
+        run: |
+          test -f SonyMusic_source.zip || { echo 'ERROR: Upload SonyMusic_source.zip to the repository root first.'; exit 1; }
+          unzip -q SonyMusic_source.zip
+          test -f SonyMusic_source/apktool.yml || { echo 'ERROR: Expected SonyMusic_source/apktool.yml was not found in the ZIP.'; exit 1; }
+
+      - name: Rebuild APK
+        run: |
+          java -jar apktool.jar b SonyMusic_source -o SonyMusic-unsigned.apk
+          test -s SonyMusic-unsigned.apk
+
+      - name: Create signing key and sign APK
+        run: |
+          keytool -genkeypair -v \
+            -keystore build-signing-key.jks \
+            -storepass android -keypass android \
+            -alias sony-music-build \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Local Build, OU=Android, O=Personal, L=Kolkata, ST=West Bengal, C=IN"
+          apksigner sign \
+            --ks build-signing-key.jks \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out SonyMusic-9.4.11.A.0.12-signed.apk \
+            SonyMusic-unsigned.apk
+          apksigner verify --verbose SonyMusic-9.4.11.A.0.12-signed.apk
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SonyMusic-signed-APK
+          path: SonyMusic-9.4.11.A.0.12-signed.apk
+          if-no-files-found: error
+          retention-days: 7
